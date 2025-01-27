@@ -17,13 +17,6 @@ public class VelocityConfig {
     )
     public static String forwardingSecret = "";
 
-    @Option("KickMessage")
-    @Description(
-        "The message that will be displayed when a player is not connecting through Velocity"
-    )
-    public static String kickMessage =
-        "You must connect through Velocity to join this server!";
-
     public static void load() {
         try {
             ConfigLoader<VelocityConfig> configLoader = new ConfigLoader<>(

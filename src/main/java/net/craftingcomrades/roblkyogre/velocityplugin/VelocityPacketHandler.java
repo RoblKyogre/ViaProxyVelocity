@@ -17,30 +17,30 @@
  */
 package net.craftingcomrades.roblkyogre.velocityplugin;
 
-import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import static java.util.Arrays.binarySearch;
+
+import com.google.common.net.InetAddresses;
+import com.mojang.authlib.GameProfile;
+import com.mojang.authlib.properties.Property;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
+import java.net.InetAddress;
+import java.security.InvalidKeyException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import net.lenni0451.mcstructs.text.components.StringComponent;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import net.raphimc.netminecraft.packet.Packet;
 import net.raphimc.netminecraft.packet.PacketTypes;
-import net.raphimc.netminecraft.packet.impl.common.C2SCustomPayloadPacket;
 import net.raphimc.netminecraft.packet.impl.login.C2SLoginCustomQueryAnswerPacket;
-import net.raphimc.netminecraft.packet.impl.login.C2SLoginHelloPacket;
 import net.raphimc.netminecraft.packet.impl.login.S2CLoginCustomQueryPacket;
-import net.raphimc.netminecraft.packet.impl.login.S2CLoginDisconnectPacket;
-import net.raphimc.netminecraft.packet.impl.play.S2CPlayCustomPayloadPacket;
 import net.raphimc.viaproxy.proxy.packethandler.PacketHandler;
 import net.raphimc.viaproxy.proxy.session.ProxyConnection;
 import net.raphimc.viaproxy.util.logging.Logger;
@@ -57,56 +57,112 @@ public class VelocityPacketHandler extends PacketHandler {
         super(proxyConnection);
     }
 
-    private void sendVelocityPacket() {
-        try {
-            Logger.LOGGER.error("Login detected.");
-            final ByteBuf response = sendCustomPayload(
-                VelocityConstants.INFO_CHANNEL,
-                PacketTypes.writeVarInt(
-                    Unpooled.buffer(),
-                    VelocityConstants.MODERN_LAZY_SESSION
-                )
-            ).get(1, TimeUnit.SECONDS);
-            if (response == null) throw new TimeoutException();
-            if (
-                response.isReadable() && !response.readBoolean()
-            ) throw new TimeoutException();
-        } catch (Exception e) {
-            //event.getProxyConnection().kickClient(VelocityConfig.kickMessage);
-            Logger.LOGGER.error("Exception hit!");
-        }
-    }
-
     @Override
     public boolean handleC2P(
         Packet packet,
         List<ChannelFutureListener> listeners
     ) {
-        if (packet instanceof C2SLoginHelloPacket loginHello) {
-            sendCustomPayload(
-                VelocityConstants.INFO_CHANNEL,
-                PacketTypes.writeVarInt(
-                    Unpooled.buffer(),
-                    VelocityConstants.MODERN_LAZY_SESSION
-                )
-            );
-        } else if (
+        if (
             packet instanceof
             C2SLoginCustomQueryAnswerPacket loginCustomQueryAnswer
         ) {
-            Logger.LOGGER.info("Custom packet detected!");
+            final ByteBuf responseBuf = Unpooled.wrappedBuffer(
+                loginCustomQueryAnswer.response
+            );
             if (
                 loginCustomQueryAnswer.response != null &&
                 this.handleCustomPayload(
                         loginCustomQueryAnswer.queryId,
-                        Unpooled.wrappedBuffer(loginCustomQueryAnswer.response)
+                        responseBuf
                     )
             ) {
+                if (!verifySignature(responseBuf)) {
+                    this.proxyConnection.kickClient(
+                            "§cCould not verify player details!"
+                        );
+                    return false;
+                }
+
+                InetAddress clientAddress = InetAddresses.forString(
+                    PacketTypes.readString(responseBuf, Short.MAX_VALUE)
+                );
+
+                final GameProfile profile = new GameProfile(
+                    PacketTypes.readUuid(responseBuf),
+                    PacketTypes.readString(responseBuf, 16)
+                );
+                final int properties = PacketTypes.readVarInt(responseBuf);
+                for (int i1 = 0; i1 < properties; i1++) {
+                    final String name = PacketTypes.readString(
+                        responseBuf,
+                        Short.MAX_VALUE
+                    );
+                    final String value = PacketTypes.readString(
+                        responseBuf,
+                        Short.MAX_VALUE
+                    );
+                    final String signature = responseBuf.readBoolean()
+                        ? PacketTypes.readString(responseBuf, Short.MAX_VALUE)
+                        : null;
+                    profile
+                        .getProperties()
+                        .put(name, new Property(name, value, signature));
+                }
+                this.proxyConnection.setGameProfile(profile);
+
                 return false;
             }
         }
 
         return true;
+    }
+
+    private boolean verifySignature(final ByteBuf responseBuf) {
+        try {
+            final byte[] responseSig = new byte[32];
+            responseBuf.readBytes(responseSig);
+
+            final byte[] responseData = new byte[responseBuf.readableBytes()];
+            responseBuf.getBytes(responseBuf.readerIndex(), responseData);
+
+            final Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(
+                new SecretKeySpec(
+                    VelocityConfig.forwardingSecret.getBytes(),
+                    "HmacSHA256"
+                )
+            );
+            final byte[] dataSig = mac.doFinal(responseData);
+            if (!MessageDigest.isEqual(responseSig, dataSig)) {
+                return false;
+            }
+
+            int version = PacketTypes.readVarInt(responseBuf);
+            if (
+                binarySearch(
+                    VelocityConstants.SUPPORTED_FORWARDING_VERSIONS,
+                    version
+                ) <
+                0
+            ) {
+                throw new IllegalStateException(
+                    "Unsupported forwarding version " +
+                    version +
+                    ", supported " +
+                    Arrays.toString(
+                        VelocityConstants.SUPPORTED_FORWARDING_VERSIONS
+                    )
+                );
+            }
+            return true;
+        } catch (
+            final InvalidKeyException
+            | NoSuchAlgorithmException
+            | IllegalStateException e
+        ) {
+            Logger.LOGGER.error("Forwarding secret check failed!", e);
+            return false;
+        }
     }
 
     public CompletableFuture<ByteBuf> sendCustomPayload(
@@ -121,7 +177,6 @@ public class VelocityPacketHandler extends PacketHandler {
 
         switch (this.proxyConnection.getC2pConnectionState()) {
             case LOGIN:
-                Logger.LOGGER.info("Sending custom payload...");
                 this.proxyConnection.getC2P()
                     .writeAndFlush(
                         new S2CLoginCustomQueryPacket(
@@ -148,14 +203,8 @@ public class VelocityPacketHandler extends PacketHandler {
     private boolean handleCustomPayload(final int id, final ByteBuf data) {
         if (this.customPayloadListener.containsKey(id)) {
             this.customPayloadListener.remove(id).complete(data);
-            Logger.LOGGER.info(
-                "Received a custom payload packet with id: " + id
-            );
             return true;
         }
-        Logger.LOGGER.info(
-            "Received a custom payload packet with an unknown id: " + id
-        );
         return false;
     }
 }

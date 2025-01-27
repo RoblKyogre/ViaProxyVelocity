@@ -17,21 +17,18 @@
  */
 package net.craftingcomrades.roblkyogre.velocityplugin;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import net.lenni0451.lambdaevents.EventHandler;
 import net.lenni0451.reflect.Enums;
 import net.lenni0451.reflect.stream.RStream;
 import net.raphimc.netminecraft.packet.PacketTypes;
 import net.raphimc.viaproxy.ViaProxy;
 import net.raphimc.viaproxy.plugins.ViaProxyPlugin;
+import net.raphimc.viaproxy.plugins.events.ClientLoggedInEvent;
 import net.raphimc.viaproxy.plugins.events.ConnectEvent;
-import net.raphimc.viaproxy.plugins.events.JoinServerRequestEvent;
 import net.raphimc.viaproxy.plugins.events.ViaProxyLoadedEvent;
 import net.raphimc.viaproxy.protocoltranslator.viaproxy.ViaProxyConfig;
 import net.raphimc.viaproxy.ui.I18n;
@@ -75,41 +72,26 @@ public class VelocityPlugin extends ViaProxyPlugin {
 
     @EventHandler
     private void onConnect(ConnectEvent event) {
-        Logger.LOGGER.error("Hi connection.");
         event
             .getProxyConnection()
             .getPacketHandlers()
             .add(0, new VelocityPacketHandler(event.getProxyConnection()));
     }
-    /*@EventHandler
-    private void onJoinServerRequest(JoinServerRequestEvent event)
+
+    @EventHandler
+    private void onClientLoggedIn(ClientLoggedInEvent event)
         throws ExecutionException, InterruptedException {
         if (ViaProxy.getConfig().getAuthMethod() == VELOCITY) {
-            try {
-                Logger.LOGGER.error("Login detected.");
-                final ByteBuf response = event
-                    .getProxyConnection()
-                    .getPacketHandler(VelocityPacketHandler.class)
-                    .sendCustomPayload(
-                        VelocityConstants.INFO_CHANNEL,
-                        PacketTypes.writeVarInt(
-                            Unpooled.buffer(),
-                            VelocityConstants.MODERN_LAZY_SESSION
-                        )
+            event
+                .getProxyConnection()
+                .getPacketHandler(VelocityPacketHandler.class)
+                .sendCustomPayload(
+                    VelocityConstants.INFO_CHANNEL,
+                    PacketTypes.writeVarInt(
+                        Unpooled.buffer(),
+                        VelocityConstants.MODERN_LAZY_SESSION
                     )
-                    .get(6, TimeUnit.SECONDS);
-                if (response == null) throw new TimeoutException();
-                if (
-                    response.isReadable() && !response.readBoolean()
-                ) throw new TimeoutException();
-                event.setCancelled(true);
-            } catch (TimeoutException e) {
-                event
-                    .getProxyConnection()
-                    .kickClient(VelocityConfig.kickMessage);
-            }
-        } else {
-            Logger.LOGGER.error("That's not very velocity of you...");
+                );
         }
-    }*/
+    }
 }
