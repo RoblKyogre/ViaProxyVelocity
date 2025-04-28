@@ -12,3 +12,7 @@ This plugin allows Velcoity servers to include a ViaProxy server as a possible b
 ## Contact
 If you encounter any issues, please report them on the
 [issue tracker](https://github.com/RoblKyogre/ViaProxyVelocity/issues).
+
+## Acknowledgements
+
+This project is forked from [ViaProxyOpenAuthMod](https://github.com/ViaVersionAddons/ViaProxyOpenAuthMod), which is licensed under GPLv3 (see `LICENSE`). This project also incorporates code from [FabricProxy-Lite](https://github.com/OKTW-Network/FabricProxy-Lite), which is licensed under MIT (see `LICENSE-MIT`).
